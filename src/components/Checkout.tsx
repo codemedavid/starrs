@@ -35,8 +35,6 @@ const Checkout: React.FC<CheckoutProps> = ({ cartItems, totalPrice, onBack }) =>
   const [pickupTime, setPickupTime] = useState('5-10');
   const [customTime, setCustomTime] = useState('');
   // Dine-in specific state
-  const [partySize, setPartySize] = useState(1);
-  const [dineInTime, setDineInTime] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('gcash');
   const [referenceNumber, setReferenceNumber] = useState('');
   const [notes, setNotes] = useState('');
@@ -60,6 +58,13 @@ const Checkout: React.FC<CheckoutProps> = ({ cartItems, totalPrice, onBack }) =>
       setPaymentMethod(paymentMethods[0].id as PaymentMethod);
     }
   }, [paymentMethods, paymentMethod]);
+
+  // Automatically show suggestions when they arrive (if query is long enough)
+  React.useEffect(() => {
+    if (suggestions.length > 0 && addressQuery.length >= 3 && serviceType === 'delivery') {
+      setShowSuggestions(true);
+    }
+  }, [suggestions, addressQuery, serviceType]);
 
   const selectedPaymentMethod = paymentMethods.find(method => method.id === paymentMethod);
   const deliveryCharge = serviceType === 'delivery' ? (deliveryFee ?? 0) : 0;
@@ -94,8 +99,6 @@ const Checkout: React.FC<CheckoutProps> = ({ cartItems, totalPrice, onBack }) =>
           address: serviceType === 'delivery' ? address : undefined,
           landmark: serviceType === 'delivery' ? landmark : undefined,
           pickupTime: serviceType === 'pickup' ? (pickupTime === 'custom' ? customTime : `${pickupTime} minutes`) : undefined,
-          partySize: serviceType === 'dine-in' ? partySize : undefined,
-          dineInTime: serviceType === 'dine-in' ? dineInTime : undefined,
           referenceNumber: referenceNumber || undefined,
           notes: notes || undefined,
           deliveryFee: serviceType === 'delivery' ? deliveryFee ?? undefined : undefined,
@@ -110,17 +113,6 @@ const Checkout: React.FC<CheckoutProps> = ({ cartItems, totalPrice, onBack }) =>
         ? (pickupTime === 'custom' ? customTime : `${pickupTime} minutes`)
         : '';
       
-      const dineInInfo = serviceType === 'dine-in' 
-        ? `👥 Party Size: ${partySize} person${partySize !== 1 ? 's' : ''}\n🕐 Preferred Time: ${new Date(dineInTime).toLocaleString('en-US', { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric', 
-            hour: '2-digit', 
-            minute: '2-digit' 
-          })}`
-        : '';
-      
       const orderDetails = `
 🛒 Starr's Famous Shakes ORDER
 📦 Order Number: ${order.order_number}
@@ -130,9 +122,6 @@ const Checkout: React.FC<CheckoutProps> = ({ cartItems, totalPrice, onBack }) =>
 📍 Service: ${serviceType.charAt(0).toUpperCase() + serviceType.slice(1)}
  ${serviceType === 'delivery' ? `🏠 Address: ${address}${landmark ? `\n🗺️ Landmark: ${landmark}` : ''}` : ''}
 ${serviceType === 'pickup' ? `⏰ Pickup Time: ${timeInfo}` : ''}
-${serviceType === 'dine-in' ? dineInInfo : ''}
-
-
 📋 ORDER DETAILS:
 ${cartItems.map(item => {
   let itemDetails = `• ${item.name}`;
@@ -323,9 +312,8 @@ Please confirm this order to proceed. Thank you for choosing Starr's Famous Shak
   }, [serviceType, address, deliveryCoordinates, lalamoveConfig]);
 
   const isDetailsValid = customerName && contactNumber && 
-    (serviceType !== 'delivery' || (address && (lalamoveConfig ? deliveryFee !== null : true))) && 
-    (serviceType !== 'pickup' || (pickupTime !== 'custom' || customTime)) &&
-    (serviceType !== 'dine-in' || (partySize > 0 && dineInTime));
+    (serviceType !== 'delivery' || (address && deliveryFee !== null)) && 
+    (serviceType !== 'pickup' || (pickupTime !== 'custom' || customTime));
 
   if (step === 'details') {
     return (
@@ -406,11 +394,37 @@ Please confirm this order to proceed. Thank you for choosing Starr's Famous Shak
                 <input
                   type="tel"
                   value={contactNumber}
-                  onChange={(e) => setContactNumber(e.target.value)}
+                  onChange={(e) => {
+                    let value = e.target.value.replace(/\D/g, ''); // Remove non-digits
+                    // Normalize to always start with 63
+                    if (value.length > 0) {
+                      if (value.startsWith('63')) {
+                        // Already starts with 63, keep as is
+                        value = value;
+                      } else if (value.startsWith('0')) {
+                        // Remove leading 0 and add 63
+                        value = '63' + value.slice(1);
+                      } else if (value.startsWith('9')) {
+                        // Add 63 prefix
+                        value = '63' + value;
+                      } else {
+                        // Add 63 prefix
+                        value = '63' + value;
+                      }
+                      // Limit to reasonable length (63 + 10 digits = 13 total)
+                      if (value.length > 13) {
+                        value = value.slice(0, 13);
+                      }
+                    }
+                    setContactNumber(value);
+                  }}
                   className="w-full px-4 py-3 border border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all duration-200"
-                  placeholder="09XX XXX XXXX"
+                  placeholder="63XXXXXXXXXX"
                   required
                 />
+                {contactNumber && !contactNumber.startsWith('63') && (
+                  <p className="text-sm text-red-600 mt-1">Phone number will be normalized to start with 63</p>
+                )}
               </div>
 
               {/* Service Type */}
@@ -438,45 +452,6 @@ Please confirm this order to proceed. Thank you for choosing Starr's Famous Shak
                   ))}
                 </div>
               </div>
-
-              {/* Dine-in Details */}
-              {serviceType === 'dine-in' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-black mb-2">Party Size *</label>
-                    <div className="flex items-center space-x-4">
-                      <button
-                        type="button"
-                        onClick={() => setPartySize(Math.max(1, partySize - 1))}
-                        className="w-10 h-10 rounded-lg border-2 border-red-300 flex items-center justify-center text-red-600 hover:border-red-400 hover:bg-red-50 transition-all duration-200"
-                      >
-                        -
-                      </button>
-                      <span className="text-2xl font-semibold text-black min-w-[3rem] text-center">{partySize}</span>
-                      <button
-                        type="button"
-                        onClick={() => setPartySize(Math.min(20, partySize + 1))}
-                        className="w-10 h-10 rounded-lg border-2 border-red-300 flex items-center justify-center text-red-600 hover:border-red-400 hover:bg-red-50 transition-all duration-200"
-                      >
-                        +
-                      </button>
-                      <span className="text-sm text-gray-600 ml-2">person{partySize !== 1 ? 's' : ''}</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-black mb-2">Preferred Time *</label>
-                    <input
-                      type="datetime-local"
-                      value={dineInTime}
-                      onChange={(e) => setDineInTime(e.target.value)}
-                      className="w-full px-4 py-3 border border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all duration-200"
-                      required
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Please select your preferred dining time</p>
-                  </div>
-                </>
-              )}
 
               {/* Pickup Time Selection */}
               {serviceType === 'pickup' && (
@@ -769,23 +744,6 @@ Please confirm this order to proceed. Thank you for choosing Starr's Famous Shak
                 <p className="text-sm text-gray-600">
                   Pickup Time: {pickupTime === 'custom' ? customTime : `${pickupTime} minutes`}
                 </p>
-              )}
-              {serviceType === 'dine-in' && (
-                <>
-                  <p className="text-sm text-gray-600">
-                    Party Size: {partySize} person{partySize !== 1 ? 's' : ''}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    Preferred Time: {dineInTime ? new Date(dineInTime).toLocaleString('en-US', { 
-                      weekday: 'long', 
-                      year: 'numeric', 
-                      month: 'long', 
-                      day: 'numeric', 
-                      hour: '2-digit', 
-                      minute: '2-digit' 
-                    }) : 'Not selected'}
-                  </p>
-                </>
               )}
             </div>
 

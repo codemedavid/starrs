@@ -1,10 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
+  throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY');
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
@@ -219,6 +219,11 @@ export type Database = {
           created_at: string;
           updated_at: string;
           completed_at: string | null;
+          delivery_fee: number | null;
+          lalamove_quotation_id: string | null;
+          lalamove_order_id: string | null;
+          lalamove_status: string | null;
+          lalamove_tracking_url: string | null;
         };
         Insert: {
           id?: string;
@@ -240,6 +245,11 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
           completed_at?: string | null;
+          delivery_fee?: number | null;
+          lalamove_quotation_id?: string | null;
+          lalamove_order_id?: string | null;
+          lalamove_status?: string | null;
+          lalamove_tracking_url?: string | null;
         };
         Update: {
           id?: string;
@@ -261,6 +271,11 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
           completed_at?: string | null;
+          delivery_fee?: number | null;
+          lalamove_quotation_id?: string | null;
+          lalamove_order_id?: string | null;
+          lalamove_status?: string | null;
+          lalamove_tracking_url?: string | null;
         };
       };
       order_items: {

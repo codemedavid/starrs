@@ -41,7 +41,7 @@ function generateSignature(method, path, body, timestamp, secret) {
   const message = `${timestamp}\r\n${method}\r\n${path}\r\n\r\n${body}`;
   const hmac = crypto.createHmac('sha256', secret);
   hmac.update(message);
-  const signature = hmac.digest('base64');
+  const signature = hmac.digest('hex');
   return signature;
 }
 
@@ -50,15 +50,17 @@ function generateSignature(method, path, body, timestamp, secret) {
  */
 async function makeRequest(method, path, body = null) {
   const baseUrl = config.isSandbox ? LALAMOVE_SANDBOX_URL : LALAMOVE_PRODUCTION_URL;
-  const timestamp = new Date().toISOString();
+  const timestamp = new Date().getTime().toString();
   const bodyString = body ? JSON.stringify(body) : '';
-  
-  const signature = generateSignature(method, path, bodyString, timestamp, config.apiSecret);
-  const authHeader = `hmac ${config.apiKey}:${signature}`;
+
+  // Lalamove expects /v3 prefix in signature path
+  const signaturePath = `/v3${path}`;
+  const signature = generateSignature(method, signaturePath, bodyString, timestamp, config.apiSecret);
+  const authHeader = `hmac ${config.apiKey}:${timestamp}:${signature}`;
   const requestId = `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  
+
   const url = `${baseUrl}${path}`;
-  
+
   console.log('\n=== Request Details ===');
   console.log('URL:', url);
   console.log('Method:', method);
@@ -66,7 +68,7 @@ async function makeRequest(method, path, body = null) {
   console.log('Request ID:', requestId);
   console.log('Market:', config.market);
   console.log('Body:', bodyString || '(empty)');
-  
+
   try {
     // Use Node.js https module for making requests
     const urlObj = new URL(url);
@@ -77,7 +79,7 @@ async function makeRequest(method, path, body = null) {
       method: method,
       headers: {
         'Content-Type': 'application/json',
-        'X-LLM-Market': config.market,
+        'Market': config.market,
         'Authorization': authHeader,
         'X-Request-ID': requestId
       }
@@ -112,13 +114,13 @@ async function makeRequest(method, path, body = null) {
 
       req.end();
     });
-    
+
     console.log('\n=== Response ===');
     console.log('Status:', response.status, response.statusText);
-    
+
     const responseText = await response.text();
     console.log('Response Body:', responseText);
-    
+
     if (!response.ok) {
       let errorData;
       try {
@@ -128,7 +130,7 @@ async function makeRequest(method, path, body = null) {
       }
       throw new Error(`API Error: ${JSON.stringify(errorData)}`);
     }
-    
+
     const data = await response.json();
     return data.data || data;
   } catch (error) {
@@ -147,7 +149,7 @@ async function makeRequest(method, path, body = null) {
  */
 async function testQuotation() {
   console.log('\n🧪 Testing Lalamove Quotation API...\n');
-  
+
   // Test stops (replace with your actual coordinates)
   const pickupStop = {
     location: {
@@ -161,7 +163,7 @@ async function testQuotation() {
       }
     }
   };
-  
+
   const deliveryStop = {
     location: {
       lat: '14.6095',
@@ -174,7 +176,7 @@ async function testQuotation() {
       }
     }
   };
-  
+
   const request = {
     serviceType: 'MOTORCYCLE',
     stops: [pickupStop, deliveryStop],
@@ -183,7 +185,7 @@ async function testQuotation() {
       weight: '1'
     }
   };
-  
+
   try {
     const quotation = await makeRequest('POST', '/quotations', { data: request });
     console.log('\n✅ Success! Quotation received:');
@@ -203,7 +205,7 @@ async function testQuotation() {
 async function main() {
   console.log('🚀 Lalamove API Test Script');
   console.log('============================\n');
-  
+
   // Validate configuration
   if (config.apiKey === 'YOUR_API_KEY' || config.apiSecret === 'YOUR_API_SECRET') {
     console.error('❌ Please set LALAMOVE_API_KEY and LALAMOVE_API_SECRET environment variables');
@@ -211,12 +213,12 @@ async function main() {
     console.log('  LALAMOVE_API_KEY=your_key LALAMOVE_API_SECRET=your_secret LALAMOVE_MARKET=PH node test-lalamove.js');
     process.exit(1);
   }
-  
+
   console.log('Configuration:');
   console.log('  Market:', config.market);
   console.log('  Environment:', config.isSandbox ? 'Sandbox' : 'Production');
   console.log('  API Key:', config.apiKey.substring(0, 8) + '...');
-  
+
   try {
     await testQuotation();
     console.log('\n✅ All tests passed!');

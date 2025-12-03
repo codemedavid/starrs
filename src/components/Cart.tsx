@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { Trash2, Plus, Minus, ArrowLeft } from 'lucide-react';
 import { CartItem } from '../types';
@@ -115,7 +117,7 @@ const Cart: React.FC<CartProps> = ({
       <div className="bg-white rounded-xl shadow-md border-2 border-starrs-teal/20 p-6">
         <div className="flex items-center justify-between text-2xl font-bold text-starrs-teal-dark mb-6" style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
           <span>Total:</span>
-          <span className="text-starrs-green">₱{parseFloat(getTotalPrice() || 0).toFixed(2)}</span>
+          <span className="text-starrs-green">₱{(getTotalPrice() || 0).toFixed(2)}</span>
         </div>
         
         <button

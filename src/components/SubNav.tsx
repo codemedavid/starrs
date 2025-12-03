@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { useCategories } from '../hooks/useCategories';
 
@@ -54,5 +56,3 @@ const SubNav: React.FC<SubNavProps> = ({ selectedCategory, onCategoryClick }) =>
 };
 
 export default SubNav;
-
-

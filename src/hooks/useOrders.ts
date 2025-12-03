@@ -1,10 +1,37 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { Order, OrderFilters, OrderStats, OrderStatus, CartItem } from '../types';
-import { getClientIP, checkRateLimit, recordAction } from '../lib/rateLimit';
 import { createDeliveryOrder, buildLalamoveConfig } from '../lib/lalamove';
 import type { DeliveryOrderResult } from '../lib/lalamove';
 import { useSiteSettings } from './useSiteSettings';
+import type { RealtimeChannel } from '@supabase/supabase-js';
+
+/**
+ * Admin password (should match server-side)
+ */
+const ADMIN_PASSWORD = 'Starrs@Admin!2025';
+
+/**
+ * Generate admin auth token from password
+ * Must match server-side implementation
+ */
+function generateAdminToken(): string {
+  // Simple token generation - matches server-side
+  return btoa(ADMIN_PASSWORD);
+}
+
+/**
+ * Get admin auth headers if admin is authenticated
+ */
+function getAdminHeaders(): Record<string, string> {
+  const isAdmin = typeof window !== 'undefined' && localStorage.getItem('beracah_admin_auth') === 'true';
+  if (isAdmin) {
+    return {
+      'X-Admin-Auth': generateAdminToken()
+    };
+  }
+  return {};
+}
 
 interface CreateOrderOptions {
   address?: string;
@@ -19,7 +46,6 @@ interface CreateOrderOptions {
   deliveryLat?: number;
   deliveryLng?: number;
 }
-import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export const useOrders = () => {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -28,130 +54,89 @@ export const useOrders = () => {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const currentFiltersRef = useRef<OrderFilters | undefined>(undefined);
   const { siteSettings } = useSiteSettings();
-  const lalamoveConfig = useMemo(() => buildLalamoveConfig(siteSettings), [siteSettings]);
+  const lalamoveConfig = buildLalamoveConfig(siteSettings);
 
   const normalizePhoneNumber = (phone?: string): string | undefined => {
     if (!phone) return undefined;
     const trimmed = phone.trim();
     if (!trimmed) return undefined;
-    if (trimmed.startsWith('+')) return trimmed;
+    
+    // Remove all non-digits
     const digits = trimmed.replace(/\D/g, '');
     if (!digits) return undefined;
-    const isPH = digits.startsWith('63') || digits.startsWith('0') || digits.startsWith('9');
-    if (isPH) {
-      if (digits.startsWith('63')) return `+${digits}`;
-      if (digits.startsWith('0')) return `+63${digits.slice(1)}`;
+    
+    // Always normalize to +63 format
+    if (digits.startsWith('63')) {
+      return `+${digits}`;
+    } else if (digits.startsWith('0')) {
+      // Remove leading 0 and add 63
+      return `+63${digits.slice(1)}`;
+    } else if (digits.startsWith('9')) {
+      // Add 63 prefix
+      return `+63${digits}`;
+    } else {
+      // Add 63 prefix for any other format
       return `+63${digits}`;
     }
-    return `+${digits}`;
   };
 
-  // Format order data helper
-  const formatOrderData = (order: any): Order => ({
-    id: order.id,
-    order_number: order.order_number,
-    customer_name: order.customer_name,
-    contact_number: order.contact_number,
-    service_type: order.service_type,
-    address: order.address,
-    landmark: order.landmark,
-    pickup_time: order.pickup_time,
-    party_size: order.party_size,
-    dine_in_time: order.dine_in_time,
-    payment_method: order.payment_method,
-    reference_number: order.reference_number,
-    status: order.status,
-    total: order.total,
-    notes: order.notes,
-    customer_ip: order.customer_ip,
-    created_at: order.created_at,
-    updated_at: order.updated_at,
-    completed_at: order.completed_at,
-    delivery_fee: order.delivery_fee ? Number(order.delivery_fee) : null,
-    lalamove_quotation_id: order.lalamove_quotation_id,
-    lalamove_order_id: order.lalamove_order_id,
-    lalamove_status: order.lalamove_status,
-    lalamove_tracking_url: order.lalamove_tracking_url,
-    order_items: order.order_items?.map((item: any) => ({
-      id: item.id,
-      order_id: item.order_id,
-      menu_item_id: item.menu_item_id,
-      menu_item_name: item.menu_item_name,
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-      total_price: item.total_price,
-      selected_variation: item.selected_variation,
-      selected_add_ons: item.selected_add_ons,
-      created_at: item.created_at
-    })) || []
-  });
-
-  const fetchOrders = async (filters?: OrderFilters) => {
+  const fetchOrders = useCallback(async (filters?: OrderFilters) => {
     try {
       setLoading(true);
-      
-      let query = supabase
-        .from('orders')
-        .select(`
-          *,
-          order_items (*)
-        `)
-        .order('created_at', { ascending: false });
-
-      // Apply filters
-      if (filters?.status) {
-        query = query.eq('status', filters.status);
-      }
-      
-      if (filters?.service_type) {
-        query = query.eq('service_type', filters.service_type);
-      }
-      
-      if (filters?.date_from) {
-        query = query.gte('created_at', filters.date_from);
-      }
-      
-      if (filters?.date_to) {
-        query = query.lte('created_at', filters.date_to);
-      }
-      
-      if (filters?.search) {
-        const searchTerm = filters.search.toLowerCase();
-        query = query.or(`order_number.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,contact_number.ilike.%${searchTerm}%`);
-      }
-
-      const { data, error: fetchError } = await query;
-
-      if (fetchError) throw fetchError;
-
-      const formattedOrders: Order[] = (data || []).map(order => formatOrderData(order));
-
-      setOrders(formattedOrders);
       setError(null);
+      
+      // Build query string
+      const params = new URLSearchParams();
+      if (filters?.status) params.append('status', filters.status);
+      if (filters?.service_type) params.append('service_type', filters.service_type);
+      if (filters?.date_from) params.append('date_from', filters.date_from);
+      if (filters?.date_to) params.append('date_to', filters.date_to);
+      if (filters?.search) params.append('search', filters.search);
+
+      const queryString = params.toString();
+      const url = `/api/orders${queryString ? `?${queryString}` : ''}`;
+
+      const response = await fetch(url, {
+        headers: {
+          ...getAdminHeaders()
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to fetch orders' }));
+        throw new Error(errorData.error || 'Failed to fetch orders');
+      }
+
+      const data = await response.json();
+      setOrders(data.orders || []);
+      currentFiltersRef.current = filters;
     } catch (err) {
       console.error('Error fetching orders:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch orders');
+      setOrders([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []); // Empty deps - function is stable
 
   const fetchOrderById = async (id: string): Promise<Order | null> => {
     try {
-      const { data, error: fetchError } = await supabase
-        .from('orders')
-        .select(`
-          *,
-          order_items (*)
-        `)
-        .eq('id', id)
-        .single();
+      const response = await fetch(`/api/orders/${id}`, {
+        headers: {
+          ...getAdminHeaders()
+        }
+      });
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null;
+        }
+        const errorData = await response.json().catch(() => ({ error: 'Failed to fetch order' }));
+        throw new Error(errorData.error || 'Failed to fetch order');
+      }
 
-      if (fetchError) throw fetchError;
-
-      if (!data) return null;
-
-      return formatOrderData(data);
+      const data = await response.json();
+      return data.order || null;
     } catch (err) {
       console.error('Error fetching order:', err);
       throw err;
@@ -168,94 +153,33 @@ export const useOrders = () => {
     options?: CreateOrderOptions
   ): Promise<Order> => {
     try {
-      // Check rate limit (frontend check)
-      const clientIP = getClientIP();
-      const rateLimitCheck = checkRateLimit(clientIP, 'order_placement', 30);
-      
-      if (!rateLimitCheck.allowed) {
-        throw new Error(`Rate limit exceeded. ${rateLimitCheck.cooldownRemaining ? `Please wait ${rateLimitCheck.cooldownRemaining} seconds.` : 'Please try again later.'}`);
-      }
-
-      // Check backend rate limit
-      // Note: The actual IP will be captured by the backend from the request
-      // For now, we'll rely on frontend rate limiting and backend RLS policies
-      // The backend function will be called server-side if needed
-
-      // Generate order number
-      const { data: orderNumberData, error: orderNumberError } = await supabase.rpc('generate_order_number');
-      
-      if (orderNumberError) throw orderNumberError;
-      if (!orderNumberData) throw new Error('Failed to generate order number');
-
-      const orderNumber = orderNumberData;
-
-      // Create order
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert({
-          order_number: orderNumber,
-          customer_name: customerName,
-          contact_number: contactNumber,
-          service_type: serviceType,
-          address: options?.address || null,
-          landmark: options?.landmark || null,
-          pickup_time: options?.pickupTime || null,
-          party_size: options?.partySize || null,
-          dine_in_time: options?.dineInTime || null,
-          payment_method: paymentMethod,
-          reference_number: options?.referenceNumber || null,
-          status: 'pending',
-          total: total,
-          delivery_fee: options?.deliveryFee ?? null,
-          lalamove_quotation_id: options?.lalamoveQuotationId || null,
-          lalamove_order_id: null,
-          lalamove_status: null,
-          lalamove_tracking_url: null,
-          notes: options?.notes || null,
-          customer_ip: clientIP
-        })
-        .select()
-        .single();
-
-      if (orderError) throw orderError;
-
-      // Create order items
-      // Extract the original menu item ID from the cart item ID
-      // Cart item IDs are formatted as: ${menuItemId}-${variationId}-${addOnIds}
-      // We need to extract just the menu item UUID (first 36 characters: 8-4-4-4-12 format)
-      const orderItems = cartItems.map(item => {
-        // Extract the original menu item ID (UUID format: 8-4-4-4-12 = 36 chars)
-        // The cart item ID format is: menuItemId-variationId-addOnIds
-        // Example: "41d67da1-f4ba-4b92-bfee-429d1be59e3f-265399d1-1d57-4376-8386-5cbf7340fd80-none"
-        // We need the first UUID: "41d67da1-f4ba-4b92-bfee-429d1be59e3f"
-        let menuItemId: string | null = null;
-        if (item.id) {
-          // Find the first UUID in the string (36 characters: 8-4-4-4-12)
-          const uuidMatch = item.id.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-          if (uuidMatch && uuidMatch[1]) {
-            menuItemId = uuidMatch[1];
-          }
-        }
-        
-        return {
-          order_id: order.id,
-          menu_item_id: menuItemId,
-          menu_item_name: item.name,
-          quantity: item.quantity,
-          unit_price: item.totalPrice,
-          total_price: item.totalPrice * item.quantity,
-          selected_variation: item.selectedVariation || null,
-          selected_add_ons: item.selectedAddOns || null
-        };
+      // Create order via API
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAdminHeaders(),
+        },
+        body: JSON.stringify({
+          cartItems,
+          customerName,
+          contactNumber,
+          serviceType,
+          paymentMethod,
+          total,
+          options
+        }),
       });
 
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .insert(orderItems);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to create order' }));
+        throw new Error(errorData.error || 'Failed to create order');
+      }
 
-      if (itemsError) throw itemsError;
+      const data = await response.json();
+      let order = data.order;
 
-      let lalamoveOrderResult: DeliveryOrderResult | null = null;
+      // Handle Lalamove delivery order creation if needed
       if (
         serviceType === 'delivery' &&
         options?.lalamoveQuotationId &&
@@ -263,7 +187,7 @@ export const useOrders = () => {
       ) {
         try {
           const normalizedRecipientPhone = normalizePhoneNumber(contactNumber) || contactNumber;
-          lalamoveOrderResult = await createDeliveryOrder(
+          const lalamoveOrderResult: DeliveryOrderResult = await createDeliveryOrder(
             options.lalamoveQuotationId,
             customerName,
             normalizedRecipientPhone,
@@ -275,37 +199,41 @@ export const useOrders = () => {
               deliveryLng: options?.deliveryLng,
             }
           );
+
+          // Update order with Lalamove info via API
+          if (lalamoveOrderResult) {
+            await fetch(`/api/orders/${order.id}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                ...getAdminHeaders(),
+              },
+              body: JSON.stringify({
+                status: order.status, // Keep current status
+                lalamove_order_id: lalamoveOrderResult.orderId,
+                lalamove_status: lalamoveOrderResult.status,
+                lalamove_tracking_url: lalamoveOrderResult.shareLink,
+              }),
+            });
+
+            // Update local order object
+            order = {
+              ...order,
+              lalamove_order_id: lalamoveOrderResult.orderId,
+              lalamove_status: lalamoveOrderResult.status,
+              lalamove_tracking_url: lalamoveOrderResult.shareLink,
+            };
+          }
         } catch (orderError) {
           console.error('Failed to create Lalamove order:', orderError);
+          // Don't fail the entire order creation if Lalamove fails
         }
       }
-
-      if (lalamoveOrderResult) {
-        const { error: lalamoveUpdateError } = await supabase
-          .from('orders')
-          .update({
-            lalamove_order_id: lalamoveOrderResult.orderId,
-            lalamove_status: lalamoveOrderResult.status,
-            lalamove_tracking_url: lalamoveOrderResult.shareLink,
-          })
-          .eq('id', order.id);
-
-        if (lalamoveUpdateError) {
-          console.error('Failed to save Lalamove order info:', lalamoveUpdateError);
-        }
-      }
-
-      // Record action for rate limiting
-      recordAction(clientIP, 'order_placement', 30);
-
-      // Fetch the complete order
-      const completeOrder = await fetchOrderById(order.id);
-      if (!completeOrder) throw new Error('Failed to fetch created order');
 
       // Refresh orders list
-      await fetchOrders();
+      await fetchOrders(currentFiltersRef.current);
 
-      return completeOrder;
+      return order;
     } catch (err) {
       console.error('Error creating order:', err);
       throw err;
@@ -314,14 +242,24 @@ export const useOrders = () => {
 
   const updateOrderStatus = async (id: string, status: OrderStatus): Promise<void> => {
     try {
-      const { error: updateError } = await supabase
-        .from('orders')
-        .update({ status })
-        .eq('id', id);
+      const response = await fetch(`/api/orders/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAdminHeaders(),
+        },
+        body: JSON.stringify({ status }),
+      });
 
-      if (updateError) throw updateError;
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to update order' }));
+        throw new Error(errorData.error || 'Failed to update order');
+      }
 
-      await fetchOrders();
+      // Refresh orders list (non-blocking - don't wait for it)
+      fetchOrders(currentFiltersRef.current).catch(err => {
+        console.error('Error refreshing orders after update:', err);
+      });
     } catch (err) {
       console.error('Error updating order status:', err);
       throw err;
@@ -330,15 +268,24 @@ export const useOrders = () => {
 
   const bulkUpdateStatus = async (ids: string[], status: OrderStatus): Promise<void> => {
     try {
-      const { error: updateError } = await supabase
-        .from('orders')
-        .update({ status })
-        .in('id', ids);
+      const response = await fetch('/api/orders/bulk', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAdminHeaders(),
+        },
+        body: JSON.stringify({ ids, status }),
+      });
 
-      if (updateError) throw updateError;
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to update orders' }));
+        throw new Error(errorData.error || 'Failed to update orders');
+      }
 
-      // Refresh orders list
-      await fetchOrders();
+      // Refresh orders list (non-blocking - don't wait for it)
+      fetchOrders(currentFiltersRef.current).catch(err => {
+        console.error('Error refreshing orders after bulk update:', err);
+      });
     } catch (err) {
       console.error('Error bulk updating order status:', err);
       throw err;
@@ -347,69 +294,33 @@ export const useOrders = () => {
 
   const getOrderStats = async (): Promise<OrderStats> => {
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayStart = today.toISOString();
-      const todayEnd = new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString();
+      const response = await fetch('/api/orders/stats', {
+        headers: {
+          ...getAdminHeaders()
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to fetch stats' }));
+        throw new Error(errorData.error || 'Failed to fetch stats');
+      }
 
-      // Get total orders
-      const { count: totalOrders } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true });
-
-      // Get pending orders
-      const { count: pendingOrders } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending');
-
-      // Get today's orders
-      const { count: todayOrders } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', todayStart)
-        .lt('created_at', todayEnd);
-
-      // Get today's revenue (only from completed orders)
-      const { data: todayOrdersData } = await supabase
-        .from('orders')
-        .select('total')
-        .gte('created_at', todayStart)
-        .lt('created_at', todayEnd)
-        .eq('status', 'completed');
-
-      const todayRevenue = todayOrdersData?.reduce((sum, order) => sum + Number(order.total), 0) || 0;
-
-      // Get completed orders
-      const { count: completedOrders } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'completed');
-
-      // Get cancelled orders
-      const { count: cancelledOrders } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'cancelled');
-
-      return {
-        total_orders: totalOrders || 0,
-        pending_orders: pendingOrders || 0,
-        today_orders: todayOrders || 0,
-        today_revenue: todayRevenue,
-        completed_orders: completedOrders || 0,
-        cancelled_orders: cancelledOrders || 0
-      };
+      const data = await response.json();
+      return data.stats;
     } catch (err) {
       console.error('Error fetching order stats:', err);
       throw err;
     }
   };
 
-  // Set up real-time subscription
+  // Set up real-time subscription for live updates
   useEffect(() => {
+    let isMounted = true;
+
     // Initial fetch
-    fetchOrders();
+    if (isMounted) {
+      fetchOrders();
+    }
 
     // Set up real-time subscription
     const channel = supabase
@@ -422,10 +333,10 @@ export const useOrders = () => {
           table: 'orders'
         },
         async (payload) => {
+          if (!isMounted) return;
           console.log('Order change received:', payload.eventType, payload.new);
           
           // Refetch orders to get updated data with order_items
-          // This ensures we always have the latest data with relationships
           if (currentFiltersRef.current) {
             await fetchOrders(currentFiltersRef.current);
           } else {
@@ -441,6 +352,7 @@ export const useOrders = () => {
           table: 'order_items'
         },
         async (payload) => {
+          if (!isMounted) return;
           console.log('Order item change received:', payload.eventType);
           
           // Refetch orders when order items change
@@ -459,29 +371,25 @@ export const useOrders = () => {
 
     // Cleanup subscription on unmount
     return () => {
+      isMounted = false;
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
     };
-  }, []);
-
-  // Update fetchOrders to store current filters
-  const fetchOrdersWithFilters = async (filters?: OrderFilters) => {
-    currentFiltersRef.current = filters;
-    await fetchOrders(filters);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount - fetchOrders is stable
 
   return {
     orders,
     loading,
     error,
-    fetchOrders: fetchOrdersWithFilters,
+    fetchOrders,
     fetchOrderById,
     createOrder,
     updateOrderStatus,
     bulkUpdateStatus,
     getOrderStats,
-    refetch: () => fetchOrdersWithFilters(currentFiltersRef.current)
+    refetch: () => fetchOrders(currentFiltersRef.current)
   };
 };

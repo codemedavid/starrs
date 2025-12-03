@@ -2,12 +2,14 @@
 
 ## Lalamove delivery setup
 
-API secrets must stay on the server. Set the following environment variables (e.g., in `.env`) before running:
+The storefront now runs on Next.js and ships a local API route under `app/api/lalamove/[action]/route.ts`. Set the following environment variables (e.g., in `.env`) before running so the client, server, and Delivery proxy all have what they need:
 
 ```
-VITE_LALAMOVE_API_KEY=pk_xxx
-VITE_LALAMOVE_API_SECRET=sk_xxx
-VITE_LALAMOVE_FUNCTION_URL=http://localhost:54321/functions/v1/lalamove
+NEXT_PUBLIC_SUPABASE_URL=https://<your-supabase>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+NEXT_PUBLIC_LALAMOVE_FUNCTION_URL=/api/lalamove
+LALAMOVE_API_KEY=pk_xxx
+LALAMOVE_API_SECRET=sk_xxx
 ```
 
-Deploy the `supabase/functions/lalamove` Edge Function or use the new Vercel API route at `src/api/lalamove.ts`. Both proxies sign requests with `LALAMOVE_API_KEY`/`LALAMOVE_API_SECRET` (stored as server secrets) and expose `/quote` and `/order`. Make sure your app and hosting env also trend `VITE_SUPABASE_ANON_KEY` for whichever functions you keep, and point `VITE_LALAMOVE_FUNCTION_URL` at the deployed proxy URL (e.g., `https://<your-app>.vercel.app/api/lalamove`). The remaining delivery metadata and store address remain editable via the Site Settings page.
+`NEXT_PUBLIC_LALAMOVE_FUNCTION_URL` can also point at your deployed Supabase Edge Function if you prefer `supabase/functions/lalamove`—just make sure the proxy URL still exposes `/quote` and `/order`. The server-only `LALAMOVE_*` secrets stay hidden from the browser. Delivery metadata and store settings stay editable via the Site Settings view in the admin dashboard.

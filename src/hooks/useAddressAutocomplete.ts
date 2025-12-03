@@ -1,3 +1,5 @@
+'use client'
+
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AddressSuggestion } from '../types';
 
@@ -15,13 +17,12 @@ import { AddressSuggestion } from '../types';
  * - Must include User-Agent header
  * - Free to use, no API key required
  */
-export const useAddressAutocomplete = (query: string) => {
+export function useAddressAutocomplete(query: string) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const lastRequestTimeRef = useRef<number>(0);
 
   const searchAddresses = useCallback(async (searchQuery: string) => {
     // Clear previous suggestions if query is empty
@@ -37,14 +38,6 @@ export const useAddressAutocomplete = (query: string) => {
       abortControllerRef.current.abort();
     }
 
-    // Rate limiting: ensure at least 1 second between requests
-    const now = Date.now();
-    const timeSinceLastRequest = now - lastRequestTimeRef.current;
-    if (timeSinceLastRequest < 1000) {
-      const waitTime = 1000 - timeSinceLastRequest;
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-    }
-
     // Create new abort controller for this request
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -53,26 +46,19 @@ export const useAddressAutocomplete = (query: string) => {
     setError(null);
 
     try {
-      // Build Nominatim API URL with enhanced parameters for detailed search
-      // Using 'q' parameter allows searching for addresses, landmarks, villages, etc.
-      // The query can include: street names, house numbers, barangays, villages, landmarks, POIs
-      const params = new URLSearchParams({
-        q: `${searchQuery}, Philippines`, // Explicitly add Philippines for better results
-        countrycodes: 'ph', // Restrict to Philippines only
-        format: 'json',
-        limit: '10', // Increased limit for more results
-        addressdetails: '1', // Get detailed address components
-        extratags: '1', // Get additional tags like amenities, shops, landmarks
-        namedetails: '1', // Get named details
-        dedupe: '1' // Deduplicate results
-      });
-
+      // Use Nominatim (OpenStreetMap) directly from client
+      // With proper headers and debouncing to respect rate limits
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+        `https://nominatim.openstreetmap.org/search?` +
+        `q=${encodeURIComponent(searchQuery)}&` +
+        `countrycodes=ph&` +
+        `format=json&` +
+        `limit=10&` +
+        `addressdetails=1`,
         {
           method: 'GET',
           headers: {
-            'User-Agent': 'Starrs-Famous-Shakes/1.0', // Required by Nominatim
+            'User-Agent': 'WhitelabelDeliveryApp/1.0',
             'Accept': 'application/json'
           },
           signal: abortController.signal
@@ -90,14 +76,21 @@ export const useAddressAutocomplete = (query: string) => {
         return;
       }
 
+      // Ensure data is an array
+      if (!Array.isArray(data)) {
+        console.error('Nominatim API returned non-array response:', data);
+        setError('Invalid response from address service');
+        setSuggestions([]);
+        return;
+      }
+
       // Transform Nominatim response to our AddressSuggestion format
-      // Include all detailed address components including villages, barangays, landmarks
       const formattedSuggestions: AddressSuggestion[] = data.map((item: any) => ({
         display_name: item.display_name,
         place_id: item.place_id,
         lat: item.lat,
         lon: item.lon,
-        type: item.type,
+        type: item.type || '',
         importance: item.importance,
         address: {
           road: item.address?.road,
@@ -144,7 +137,6 @@ export const useAddressAutocomplete = (query: string) => {
       });
 
       setSuggestions(formattedSuggestions);
-      lastRequestTimeRef.current = Date.now();
     } catch (err) {
       // Don't set error if request was aborted (user is typing)
       if (err instanceof Error && err.name === 'AbortError') {
@@ -152,7 +144,16 @@ export const useAddressAutocomplete = (query: string) => {
       }
 
       console.error('Error fetching address suggestions:', err);
-      setError('Failed to fetch address suggestions. Please try again or enter address manually.');
+      
+      // Check for network errors or CORS issues
+      if (err instanceof TypeError && err.message.includes('fetch')) {
+        setError('Network error. Please check your connection and try again.');
+      } else if (err instanceof Error) {
+        setError(`Failed to fetch address suggestions: ${err.message}. Please try again or enter address manually.`);
+      } else {
+        setError('Failed to fetch address suggestions. Please try again or enter address manually.');
+      }
+      
       setSuggestions([]);
     } finally {
       if (!abortController.signal.aborted) {
@@ -174,10 +175,10 @@ export const useAddressAutocomplete = (query: string) => {
       return;
     }
 
-    // Debounce the search (400ms delay)
+    // Debounce the search (500ms delay to respect Nominatim rate limits)
     debounceTimerRef.current = setTimeout(() => {
       searchAddresses(query);
-    }, 400);
+    }, 500);
 
     // Cleanup function
     return () => {
@@ -205,5 +206,5 @@ export const useAddressAutocomplete = (query: string) => {
     error,
     clearSuggestions: () => setSuggestions([])
   };
-};
+}
 

@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Edit, Trash2, Save, X, ArrowLeft, Coffee, TrendingUp, Package, Users, Lock, FolderOpen, CreditCard, Settings, ShoppingCart } from 'lucide-react';
 import { MenuItem, Variation, AddOn } from '../types';
 import { addOnCategories } from '../data/menuData';
@@ -12,11 +14,16 @@ import SiteSettingsManager from './SiteSettingsManager';
 import OrderManager from './OrderManager';
 
 const AdminDashboard: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('beracah_admin_auth') === 'true';
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+
+  // Check authentication status on client-side only
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIsAuthenticated(localStorage.getItem('beracah_admin_auth') === 'true');
+    }
+  }, []);
   const { menuItems, loading, addMenuItem, updateMenuItem, deleteMenuItem } = useMenu();
   const { categories } = useCategories();
   const { getOrderStats } = useOrders();
@@ -232,21 +239,21 @@ const AdminDashboard: React.FC = () => {
     setFormData({ ...formData, addOns: updatedAddOns });
   };
 
-  // Load order stats
-  useEffect(() => {
-    if (currentView === 'dashboard') {
-      loadOrderStats();
-    }
-  }, [currentView]);
-
-  const loadOrderStats = async () => {
+  const loadOrderStats = useCallback(async () => {
     try {
       const stats = await getOrderStats();
       setOrderStats(stats);
     } catch (error) {
       console.error('Error loading order stats:', error);
     }
-  };
+  }, [getOrderStats]);
+
+  // Load order stats when dashboard is active
+  useEffect(() => {
+    if (currentView === 'dashboard') {
+      loadOrderStats();
+    }
+  }, [currentView, loadOrderStats]);
 
   // Dashboard Stats
   const totalItems = menuItems.length;

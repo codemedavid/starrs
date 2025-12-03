@@ -5,7 +5,7 @@ export const useCart = () => {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
-  const calculateItemPrice = (item: MenuItem, variation?: Variation, addOns?: AddOn[]) => {
+  const calculateItemPrice = useCallback((item: MenuItem, variation?: Variation, addOns?: AddOn[]) => {
     let price = item.basePrice;
     if (variation) {
       price += variation.price;
@@ -16,7 +16,7 @@ export const useCart = () => {
       });
     }
     return price;
-  };
+  }, []);
 
   const addToCart = useCallback((item: MenuItem, quantity: number = 1, variation?: Variation, addOns?: AddOn[]) => {
     const totalPrice = calculateItemPrice(item, variation, addOns);
@@ -57,11 +57,11 @@ export const useCart = () => {
         }];
       }
     });
-  }, []);
+  }, [calculateItemPrice]);
 
   const updateQuantity = useCallback((id: string, quantity: number) => {
     if (quantity <= 0) {
-      removeFromCart(id);
+      setCartItems(prev => prev.filter(cartItem => cartItem.id !== id));
       return;
     }
     

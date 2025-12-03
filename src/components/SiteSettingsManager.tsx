@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Save, Upload, X } from 'lucide-react';
 import { useSiteSettings } from '../hooks/useSiteSettings';
@@ -85,7 +87,7 @@ const SiteSettingsManager: React.FC = () => {
     }
   }, [isEditing]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
@@ -162,7 +164,7 @@ const SiteSettingsManager: React.FC = () => {
       
       // Upload new logo if selected
       if (logoFile) {
-        const uploadedUrl = await uploadImage(logoFile, 'site-logo');
+        const uploadedUrl = await uploadImage(logoFile);
         logoUrl = uploadedUrl;
       }
 

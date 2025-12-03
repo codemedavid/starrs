@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { Plus, Edit, Trash2, Save, X, ArrowLeft, GripVertical } from 'lucide-react';
 import { useCategories, Category } from '../hooks/useCategories';

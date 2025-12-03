@@ -159,6 +159,8 @@ export interface AddressSuggestion {
   place_id: number;
   lat: string;
   lon: string;
+  type: string;
+  importance?: number;
   address: {
     road?: string;
     house_number?: string;
@@ -174,12 +176,8 @@ export interface AddressSuggestion {
     country?: string;
     neighbourhood?: string;
     quarter?: string;
-    // For landmarks and POIs
     amenity?: string;
     shop?: string;
     tourism?: string;
   };
-  // Additional fields for better search
-  type?: string;
-  importance?: number;
 }

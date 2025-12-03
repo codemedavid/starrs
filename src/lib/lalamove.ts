@@ -27,27 +27,23 @@ export interface DeliveryOrderResult {
   driverId?: string | null;
 }
 
-const FUNCTION_BASE_URL = import.meta.env.VITE_LALAMOVE_FUNCTION_URL;
+const FUNCTION_BASE_URL = process.env.NEXT_PUBLIC_LALAMOVE_FUNCTION_URL;
 
-const requireProxy = () => {
-  if (!FUNCTION_BASE_URL) {
-    throw new Error('Missing VITE_LALAMOVE_FUNCTION_URL environment variable');
-  }
-  return FUNCTION_BASE_URL;
-};
+const getProxyBase = () => FUNCTION_BASE_URL ?? '/api/lalamove';
 
 const buildFunctionUrl = (path: string) => {
-  const base = requireProxy();
+  const base = getProxyBase();
   const key = requireSupabaseKey();
   const trimmedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${base.replace(/\/$/, '')}${trimmedPath}?apikey=${encodeURIComponent(key)}`;
+  const cleanBase = base.replace(/\/$/, '');
+  return `${cleanBase}${trimmedPath}?apikey=${encodeURIComponent(key)}`;
 };
 
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 const requireSupabaseKey = () => {
   if (!SUPABASE_ANON_KEY) {
-    throw new Error('Missing VITE_SUPABASE_ANON_KEY; needed for Edge Function authentication');
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_ANON_KEY; needed for proxy authentication');
   }
   return SUPABASE_ANON_KEY;
 };
